@@ -549,13 +549,20 @@ class CudaStreamVariable(StreamVariable):
 
             if self.source:
                 install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
-            if isinstance(self.value, torch.cuda.Stream):
+
+            if hasattr(self.value, "cuda_stream"):
                 return ConstantVariable.create(self.value.cuda_stream)
+            if hasattr(self.value, "native_handle"):
+                return ConstantVariable.create(self.value.native_handle)
+
             # For torch.Stream values (e.g. from torch.accelerator.current_stream),
             # the default stream has cuda_stream == stream_id == 0.
-            return ConstantVariable.create(self.value.stream_id)
-        return super().var_getattr(tx, name)
+            if getattr(self.value, "stream_id", -1) == 0:
+                return ConstantVariable.create(0)
 
+            raise RuntimeError(f"Address for stream {self.value} could not be determined.")
+
+        return super().var_getattr(tx, name)
 
 class EventVariable(VariableTracker):
     def __init__(
