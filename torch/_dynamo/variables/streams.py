@@ -543,7 +543,9 @@ class CudaStreamVariable(StreamVariable):
     def python_type(self) -> type:
         return torch.cuda.Stream
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+        from . import ConstantVariable
+
         if name == "cuda_stream":
             from ..guards import GuardBuilder, install_guard
 
@@ -552,15 +554,9 @@ class CudaStreamVariable(StreamVariable):
 
             if hasattr(self.value, "cuda_stream"):
                 return ConstantVariable.create(self.value.cuda_stream)
-            if hasattr(self.value, "native_handle"):
-                return ConstantVariable.create(self.value.native_handle)
 
-            # For torch.Stream values (e.g. from torch.accelerator.current_stream),
-            # the default stream has cuda_stream == stream_id == 0.
-            if getattr(self.value, "stream_id", -1) == 0:
-                return ConstantVariable.create(0)
-
-            raise RuntimeError(f"Address for stream {self.value} could not be determined.")
+            assert hasattr(self.value, "native_handle"), f"Address for stream {self.value} could not be determined."
+            return ConstantVariable.create(self.value.native_handle)
 
         return super().var_getattr(tx, name)
 
