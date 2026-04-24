@@ -1972,6 +1972,42 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    def test_autograd_function_aliased_inputs_grad_accumulation(self):
+        class MyFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, q, k, v, mask_v_grad: bool):
+                ctx.save_for_backward(q, k, v)
+                ctx.mask_v_grad = mask_v_grad
+                return q * (k + v)
+
+            @staticmethod
+            def backward(ctx, dout):
+                q, k, v = ctx.saved_tensors
+                dq = dout * (k + v)
+                dk = dout * q
+                dv = dout * q
+                if ctx.mask_v_grad:
+                    return dq, dk + dv, None, None
+                return dq, dk, dv, None
+
+        for mask in [True, False]:
+
+            def f(q, k):
+                return MyFn.apply(q, k, k, mask).sum()
+
+            torch.manual_seed(0)
+            q = torch.randn(16, requires_grad=True)
+            k = torch.randn(16, requires_grad=True)
+            f(q, k).backward()
+
+            torch.manual_seed(0)
+            q_c = torch.randn(16, requires_grad=True)
+            k_c = torch.randn(16, requires_grad=True)
+            torch.compile(f, fullgraph=True)(q_c, k_c).backward()
+
+            self.assertIsNotNone(k_c.grad)
+            self.assertEqual(k.grad, k_c.grad)
+
     def test_nn_module_dataclasses_as_inputs(self):
         @dataclass
         class InputData:

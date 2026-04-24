@@ -23,6 +23,7 @@ import functools
 import inspect
 import itertools
 import logging
+import operator
 import traceback
 import types
 import warnings
@@ -5063,19 +5064,30 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 # We care about tensor args. For non-tensor args, the bwd output returns None.
                 if fwd_arg.is_tensor():
                     bwd_out_at_idx = bwd_outs[idx]
+                    fwd_proxy = fwd_arg.proxy  # type: ignore[attr-defined]
                     if bwd_out_at_idx.is_tensor():
-                        # type: ignore[attr-defined]
-                        outer_fwd_proxy_to_bwd_node[fwd_arg.proxy] = get_bwd_node(
-                            bwd_out_at_idx
-                        )
+                        new_node = get_bwd_node(bwd_out_at_idx)
+                        if (
+                            fwd_proxy in outer_fwd_proxy_to_bwd_node
+                            and outer_fwd_proxy_to_bwd_node[fwd_proxy] is not None
+                        ):
+                            outer_fwd_proxy_to_bwd_node[fwd_proxy] = (
+                                bwd_graph.call_function(
+                                    operator.add,
+                                    (outer_fwd_proxy_to_bwd_node[fwd_proxy], new_node),
+                                )
+                            )
+                        else:
+                            outer_fwd_proxy_to_bwd_node[fwd_proxy] = new_node
                     else:
                         # backward can return None at the output
                         assert (
                             isinstance(bwd_out_at_idx, variables.ConstantVariable)
                             and bwd_out_at_idx.value is None
                         )
-                        # type: ignore[attr-defined]
-                        outer_fwd_proxy_to_bwd_node[fwd_arg.proxy] = None
+                        if fwd_proxy not in outer_fwd_proxy_to_bwd_node:
+                            # type: ignore[attr-defined]
+                            outer_fwd_proxy_to_bwd_node[fwd_proxy] = None
 
         elif bwd_out.is_tensor():
             # type: ignore[attr-defined]
